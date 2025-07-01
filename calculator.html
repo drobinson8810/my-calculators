@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brokerage Comparison Calculator</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React and ReactDOM CDNs -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+    <!-- Babel for JSX transformation in the browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body { margin: 0; font-family: 'Inter', sans-serif; overflow-x: hidden; }
+        #root { min-height: 100vh; display: flex; flex-direction: column; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        // Helper function to format a number with commas for display
+        const formatNumberForDisplay = (num) => {
+            if (num === null || num === undefined || num === '') return '';
+            // Convert to string, remove non-digit/non-decimal characters
+            let numStr = String(num).replace(/[^0-9.]/g, '');
+            // Split into integer and decimal parts
+            const parts = numStr.split('.');
+            let integerPart = parts[0];
+            const decimalPart = parts.length > 1 ? '.' + parts[1] : '';
+
+            // Format integer part with commas
+            // Use Number() to convert to a number first to handle leading zeros correctly
+            const formattedIntegerPart = Number(integerPart).toLocaleString('en-US', {
+                maximumFractionDigits: 0 // Ensure no decimals in integer part formatting
+            });
+
+            return formattedIntegerPart + decimalPart;
+        };
+
+        // Helper function to parse a formatted string back to a number for calculations
+        const parseFormattedNumber = (formattedStr) => {
+            if (formattedStr === null || formattedStr === '') return '';
+            // Remove all commas before parsing to float
+            const cleanedStr = formattedStr.replace(/,/g, '');
+            return parseFloat(cleanedStr);
+        };
+
+        // Define FF commission tiers outside the component to avoid re-creation on re-renders
+        const COMMISSION_TIERS = [
+            { name: 'Apex Agent', minTransactions: 151, minVolume: 50000000, percentage: 95 },
+            { name: 'Legacy Agent', minTransactions: 111, minVolume: 36000000, percentage: 90 },
+            { name: 'Cornerstone Agent Level Three', minTransactions: 91, minVolume: 30000000, percentage: 87.5 },
+            { name: 'Cornerstone Agent Level Two', minTransactions: 71, minVolume: 24000000, percentage: 85 },
+            { name: 'Cornerstone Agent', minTransactions: 51, minVolume: 18000000, percentage: 82.5 },
+            { name: 'Foundation Agent Level Three', minTransactions: 31, minVolume: 12000000, percentage: 80 },
+            { name: 'Foundation Agent Level Two', minTransactions: 21, minVolume: 6000000, percentage: 75 },
+            { name: 'Foundation Agent', minTransactions: 0, minVolume: 0, percentage: 70 }
+        ];
+
+        // Define Annual Commission Caps based on experience
+        const ANNUAL_COMMISSION_CAPS = [
+            { years: '1-3 Years', cap: 18000, cashback: 0 },
+            { years: '4-6 Years', cap: 18000, cashback: 5 },
+            { years: '7-9 Years', cap: 18000, cashback: 7.5 },
+            { years: '10+ Years', cap: 18000, cashback: 10 }
+        ];
+
+        // Main App component for the Brokerage Comparison Calculator
+        const App = () => {
+            // State for Current Brokerage Inputs
+            const [currentBrokerageSalesVolume, setCurrentBrokerageSalesVolume] = React.useState('');
+            const [currentBrokerageAvgCommissionPerSale, setCurrentBrokerageAvgCommissionPerSale] = React.useState('');
+            const [currentBrokerageAgentSplit, setCurrentBrokerageAgentSplit] = React.useState('');
+            const [currentBrokerageCap, setCurrentBrokerageCap] = React.useState('');
+            const [currentBrokerageFees, setCurrentBrokerageFees] = React.useState('');
+
+            // State for Firm Foundation Inputs (based on last 10 years production)
+            const [ffLast10YearsTransactions, setFfLast10YearsTransactions] = React.useState('');
+            const [ffLast10YearsSalesVolume, setFfLast10YearsSalesVolume] = React.useState('');
+
+            // State for Calculated Results
+            const [totalGrossCommissionGenerated, setTotalGrossCommissionGenerated] = React.useState(null);
+            const [currentBrokerageAgentGrossEarned, setCurrentBrokerageAgentGrossEarned] = React.useState(null);
+            const [currentBrokerageNet, setCurrentBrokerageNet] = React.useState(null);
+            const [amountPaidToCurrentBrokerage, setAmountPaidToCurrentBrokerage] = React.useState(null);
+
+            const [ffCommissionPercentage, setFfCommissionPercentage] = React.useState(null);
+            const [ffAgentTier, setFfAgentTier] = React.useState('');
+            const [ffGrossCommission, setFfGrossCommission] = React.useState(null);
+            const [ffMaxBrokerCommission, setFfMaxBrokerCommission] = React.useState(null); // Now dynamic
+            const [ffNetCommission, setFfNetCommission] = React.useState(null);
+
+            // New states for next tier progress
+            const [transactionsToNextTier, setTransactionsToNextTier] = React.useState(null);
+            const [salesVolumeToNextTier, setSalesVolumeToNextTier] = React.useState(null);
+            const [nextTierName, setNextTierName] = React.useState(null);
+
+            const [netDifference, setNetDifference] = React.useState(null);
+            const [errorMessage, setErrorMessage] = React.useState('');
+
+            // Function to update Firm Foundation Tier and Percentage in real-time
+            const updateFirmFoundationTier = (transactions, salesVolume) => {
+                let calculatedPercentage = 0;
+                let tierName = 'N/A';
+
+                for (const tier of COMMISSION_TIERS) {
+                    if (transactions >= tier.minTransactions) {
+                        if (tier.minVolume === 0 || salesVolume >= tier.minVolume) {
+                            tierName = tier.name;
+                            calculatedPercentage = tier.percentage;
+                            break;
+                        }
+                    }
+                }
+                if (tierName === 'N/A' && transactions >= 0) {
+                    tierName = 'Foundation Agent';
+                    calculatedPercentage = 70;
+                }
+
+                setFfAgentTier(tierName);
+                setFfCommissionPercentage(calculatedPercentage);
+            };
+
+            // useEffect to call updateFirmFoundationTier whenever relevant inputs change
+            React.useEffect(() => {
+                const transactions = parseInt(ffLast10YearsTransactions);
+                const salesVolume = parseFormattedNumber(ffLast10YearsSalesVolume);
+
+                if (!isNaN(transactions) && !isNaN(salesVolume)) {
+                    updateFirmFoundationTier(transactions, salesVolume);
+                } else {
+                    // Reset if inputs are not valid numbers
+                    setFfAgentTier('');
+                    setFfCommissionPercentage(null);
+                }
+            }, [ffLast10YearsTransactions, ffLast10YearsSalesVolume]); // Dependencies for real-time update
+
+
+            // Function to handle the full comparison calculation
+            const calculateComparison = () => {
+                setErrorMessage(''); // Clear previous error messages
+
+                // Parse and Validate Current Brokerage Inputs
+                const currentSalesVol = parseFormattedNumber(currentBrokerageSalesVolume);
+                const currentAvgCommPerSale = parseFloat(currentBrokerageAvgCommissionPerSale || 0);
+                const currentAgentSplit = parseFloat(currentBrokerageAgentSplit);
+                const currentCap = parseFloat(currentBrokerageCap || 0);
+                const currentFees = parseFloat(currentBrokerageFees || 0);
+
+                if (isNaN(currentSalesVol) || currentSalesVol < 0) {
+                    setErrorMessage('Please enter a valid positive number for Current Brokerage Sales Volume.');
+                    return;
+                }
+                if (isNaN(currentAgentSplit) || currentAgentSplit < 0 || currentAgentSplit > 100) {
+                    setErrorMessage('Please enter a valid number for Your Commission Split (0-100).');
+                    return;
+                }
+                if (!isNaN(currentAvgCommPerSale) && (currentAvgCommPerSale < 0 || currentAvgCommPerSale > 100)) {
+                     setErrorMessage('Average Commission Percentage per Sale must be between 0 and 100.');
+                     return;
+                }
+
+
+                // Parse and Validate Firm Foundation Inputs (using last 10 years production)
+                const ffTransactions = parseInt(ffLast10YearsTransactions);
+                const ffSalesVol10Years = parseFormattedNumber(ffLast10YearsSalesVolume);
+
+                if (isNaN(ffTransactions) || ffTransactions < 0) {
+                    setErrorMessage('Please enter a valid positive number for FF Last 10 Years Transactions.');
+                    return;
+                }
+                if (isNaN(ffSalesVol10Years) || ffSalesVol10Years < 0) {
+                    setErrorMessage('Please enter a valid positive number for FF Last 10 Years Sales Volume.');
+                    return;
+                }
+
+                // --- Calculate Current Brokerage ---
+                const totalGrossCommGeneratedCalc = currentSalesVol * (currentAvgCommPerSale / 100);
+                const agentGrossEarnedCalc = totalGrossCommGeneratedCalc * (currentAgentSplit / 100);
+
+                let brokeragePortionBeforeCap = totalGrossCommGeneratedCalc - agentGrossEarnedCalc;
+                let brokeragePortionAfterCap = brokeragePortionBeforeCap;
+                if (currentCap > 0 && brokeragePortionBeforeCap > currentCap) {
+                    brokeragePortionAfterCap = currentCap;
+                }
+
+                const totalPaidToCurrentBrokerageCalc = brokeragePortionAfterCap + currentFees;
+                const currentNetCalc = totalGrossCommGeneratedCalc - totalPaidToCurrentBrokerageCalc;
+
+                setTotalGrossCommissionGenerated(totalGrossCommGeneratedCalc);
+                setCurrentBrokerageAgentGrossEarned(agentGrossEarnedCalc);
+                setAmountPaidToCurrentBrokerage(totalPaidToCurrentBrokerageCalc);
+                setCurrentBrokerageNet(currentNetCalc);
+
+
+                // --- Calculate Firm Foundation ---
+                // Firm Foundation Gross Commission Earned is the same as Total Gross Commission Generated from current brokerage
+                const ffGrossCalc = totalGrossCommGeneratedCalc;
+
+                // Calculate Firm Foundation's raw company share based on the determined FF percentage
+                // This is the percentage of the gross commission that goes to the company, before the $18,000 cap
+                const ffCompanyShareRaw = ffGrossCalc * ((100 - (ffCommissionPercentage || 70)) / 100); // Use ffCommissionPercentage from state, default to 70 if not set
+
+                // Determine the actual amount paid to Firm Foundation (capped at $18,000)
+                const actualFfBrokerCommission = Math.min(18000, ffCompanyShareRaw);
+
+                // Firm Foundation Net Commission is Gross Commission Earned minus the *actual* amount paid to FF
+                const ffNetCalc = ffGrossCalc - actualFfBrokerCommission;
+
+                setFfGrossCommission(ffGrossCalc);
+                setFfMaxBrokerCommission(actualFfBrokerCommission); // Set the dynamically calculated cap
+                setFfNetCommission(ffNetCalc);
+
+                // --- Calculate Next Tier Progress ---
+                let calculatedTransactionsToNextTier = null;
+                let calculatedSalesVolumeToNextTier = null;
+                let calculatedNextTierName = null;
+
+                const currentTierIndex = COMMISSION_TIERS.findIndex(tier => tier.name === ffAgentTier);
+
+                if (currentTierIndex > 0) { // If not the highest tier (Apex Agent)
+                    const nextHigherTier = COMMISSION_TIERS[currentTierIndex - 1]; // The next tier up in the array
+                    calculatedNextTierName = nextHigherTier.name;
+
+                    // Only show transactions/volume needed if they haven't met the criteria yet
+                    if (ffTransactions < nextHigherTier.minTransactions) {
+                        calculatedTransactionsToNextTier = nextHigherTier.minTransactions - ffTransactions;
+                    } else {
+                        calculatedTransactionsToNextTier = 0; // Already met transaction requirement
+                    }
+
+                    if (ffSalesVol10Years < nextHigherTier.minVolume) {
+                        calculatedSalesVolumeToNextTier = nextHigherTier.minVolume - ffSalesVol10Years;
+                    } else {
+                        calculatedSalesVolumeToNextTier = 0; // Already met sales volume requirement
+                    }
+
+                    // If both are met, but they are not yet in that tier (due to order of conditions in updateFirmFoundationTier),
+                    // we can still show "You are very close" or similar, but the primary logic should be that they are already in the tier.
+                    // If `ffAgentTier` is already `nextHigherTier.name`, then this "progress" section won't show.
+                    // This handles cases where they might have just hit the threshold.
+                    if (calculatedTransactionsToNextTier === 0 && calculatedSalesVolumeToNextTier === 0) {
+                        // If they've met the criteria, and are *not* yet in that tier (meaning updateFirmFoundationTier didn't catch it yet)
+                        // this message might be relevant. Otherwise, if they are already in the tier, this block won't be shown.
+                    }
+
+                }
+
+                setTransactionsToNextTier(calculatedTransactionsToNextTier);
+                setSalesVolumeToNextTier(calculatedSalesVolumeToNextTier);
+                setNextTierName(calculatedNextTierName);
+
+                // --- Calculate Net Difference ---
+                setNetDifference(ffNetCalc - currentNetCalc);
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center p-4 font-sans">
+                    <div className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-4xl border border-blue-200">
+                        <h1 className="text-3xl font-extrabold text-center text-gray-800 mb-6">
+                            Brokerage Comparison Calculator
+                        </h1>
+                        <p className="text-center text-gray-600 mb-8">
+                            Compare your potential earnings at Firm Foundation with your current brokerage. You will never pay us more than $18,000. That is your cap and we have no desk fees, transaction fees, contract review fees, technology fees, printing fees, supplies fees. No fees!
+                        </p>
+
+                        {/* Forever Commission Plan Breakdown */}
+                        <div className="mb-10 p-6 bg-blue-50 rounded-lg border border-blue-200 shadow-md">
+                            <h2 className="text-2xl font-bold text-gray-800 mb-4 text-center">Forever Commission Plan Breakdown</h2>
+
+                            <h3 className="text-xl font-semibold text-gray-700 mb-3">Tiered Commission Structure</h3>
+                            <div className="overflow-x-auto mb-6">
+                                <table className="min-w-full bg-white rounded-lg shadow-sm text-sm">
+                                    <thead>
+                                        <tr className="bg-blue-100 text-blue-800 uppercase text-left">
+                                            <th className="py-3 px-4 rounded-tl-lg">Agent Tier</th>
+                                            <th className="py-3 px-4">Transactions</th>
+                                            <th className="py-3 px-4">Sales Volume</th>
+                                            <th className="py-3 px-4 rounded-tr-lg">Percentage</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {COMMISSION_TIERS.map((tier, index) => (
+                                            <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                                <td className="py-3 px-4 font-medium">{tier.name}</td>
+                                                <td className="py-3 px-4">
+                                                    {/* Corrected logic for transaction range display */}
+                                                    {tier.minTransactions}
+                                                    {/* If not the last tier (Foundation Agent), calculate upper bound from the next tier's minTransactions - 1 */}
+                                                    {index < COMMISSION_TIERS.length - 1 ? ` to ${COMMISSION_TIERS[index + 1].minTransactions - 1}` : '+'}
+                                                </td>
+                                                <td className="py-3 px-4">
+                                                    {tier.minVolume > 0 ? `$${tier.minVolume.toLocaleString()}` : 'N/A'}
+                                                    {tier.minVolume > 0 && tier.name !== 'Apex Agent' ? ' in sales volume' : ''}
+                                                    {tier.name === 'Apex Agent' ? ' in sales volume' : ''}
+                                                </td>
+                                                <td className="py-3 px-4 font-bold text-orange-600">{tier.percentage}%</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <h3 className="text-xl font-semibold text-gray-700 mb-3">Maximum Annual Broker Commission</h3>
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full bg-white rounded-lg shadow-sm text-sm">
+                                    <thead>
+                                        <tr className="bg-blue-100 text-blue-800 uppercase text-left">
+                                            <th className="py-3 px-4 rounded-tl-lg">Years of Experience at Brokerage</th>
+                                            <th className="py-3 px-4">Max Commission Paid to Broker</th>
+                                            <th className="py-3 px-4 rounded-tr-lg">Cashback</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {ANNUAL_COMMISSION_CAPS.map((cap, index) => (
+                                            <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                                <td className="py-3 px-4 font-medium">{cap.years}</td>
+                                                <td className="py-3 px-4">${cap.cap.toLocaleString()}</td>
+                                                <td className="py-3 px-4">{cap.cashback > 0 ? `${cap.cashback}%` : 'No Cashback'}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-4 text-center">*Years will be calculated based on your hired anniversary date.</p>
+                        </div>
+
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                            {/* Current Brokerage Inputs */}
+                            <div className="bg-gray-50 p-6 rounded-lg border border-gray-200 shadow-sm">
+                                <h2 className="text-xl font-bold text-gray-800 mb-4 text-center">Your Current Brokerage</h2>
+                                <div className="mb-4">
+                                    <label htmlFor="currentSalesVolume" className="block text-sm font-medium text-gray-700 mb-2">
+                                        Last 12 Months Total Sales Volume ($):
+                                    </label>
+                                    <input
+                                        type="text" // Changed to text type for formatting
+                                        id="currentSalesVolume"
+                                        value={formatNumberForDisplay(currentBrokerageSalesVolume)} // Display formatted value
+                                        onChange={(e) => setCurrentBrokerageSalesVolume(e.target.value)} // Store raw string for parsing in calculate
+                                        placeholder="e.g., 10,000,000"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                    />
+                                </div>
+                                <div className="mb-4">
+                                    <label htmlFor="currentAvgCommissionPerSale" className="block text-sm font-medium text-gray-700 mb-2">
+                                        Avg. Commission % per Sale (e.g., 2.5%):
+                                    </label>
+                                    <input
+                                        type="number"
+                                        id="currentAvgCommissionPerSale"
+                                        value={currentBrokerageAvgCommissionPerSale}
+                                        onChange={(e) => setCurrentBrokerageAvgCommissionPerSale(e.target.value)}
+                                        placeholder="e.g., 2.5"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                    />
+                                </div>
+                                <div className="mb-4">
+                                    <label htmlFor="currentAgentSplit" className="block text-sm font-medium text-gray-700 mb-2">
+                                        Your Commission Split (%):
+                                    </label>
+                                    <input
+                                        type="number"
+                                        id="currentAgentSplit"
+                                        value={currentBrokerageAgentSplit}
+                                        onChange={(e) => setCurrentBrokerageAgentSplit(e.target.value)}
+                                        placeholder="e.g., 70"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                    />
+                                </div>
+                                <div className="mb-4">
+                                    <label htmlFor="currentCap" className="block text-sm font-medium text-gray-700 mb-2">
+                                        Yearly Cap ($) (Optional):
+                                    </label>
+                                    <input
+                                        type="number"
+                                        id="currentCap"
+                                        value={currentBrokerageCap}
+                                        onChange={(e) => setCurrentBrokerageCap(e.target.value)}
+                                        placeholder="e.g., 18,000"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                    />
+                                </div>
+                                <div className="mb-4">
+                                    <label htmlFor="currentFees" className="block text-sm font-medium text-gray-700 mb-2">
+                                        Yearly Fees ($) (Optional):
+                                    </label>
+                                    <input
+                                        type="number"
+                                        id="currentFees"
+                                        value={currentBrokerageFees}
+                                        onChange={(e) => setCurrentBrokerageFees(e.target.value)}
+                                        placeholder="e.g., 500"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Firm Foundation Inputs */}
+                            <div className="bg-blue-50 p-6 rounded-lg border border-blue-200 shadow-sm">
+                                <h2 className="text-xl font-bold text-gray-800 mb-4 text-center">Firm Foundation</h2>
+                                {/* New language added here */}
+                                <p className="text-center text-gray-600 mb-4 text-sm">
+                                    Enter in your last 10 years of transactions and sales volume to figure out your commission level.
+                                </p>
+                                <div className="mb-4">
+                                    <label htmlFor="ffLast10YearsTransactions" className="block text-sm font-medium text-gray-700 mb-2">
+                                        Last 10 Years Transactions:
+                                    </label>
+                                    <input
+                                        type="number"
+                                        id="ffLast10YearsTransactions"
+                                        value={ffLast10YearsTransactions}
+                                        onChange={(e) => setFfLast10YearsTransactions(e.target.value)}
+                                        placeholder="e.g., 55"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                    />
+                                </div>
+                                <div className="mb-4">
+                                    <label htmlFor="ffLast10YearsSalesVolume" className="block text-sm font-medium text-gray-700 mb-2">
+                                        Last 10 Years Sales Volume ($):
+                                    </label>
+                                    <input
+                                        type="text" // Changed to text type for formatting
+                                        id="ffLast10YearsSalesVolume"
+                                        value={formatNumberForDisplay(ffLast10YearsSalesVolume)} // Display formatted value
+                                        onChange={(e) => setFfLast10YearsSalesVolume(e.target.value)} // Store raw string for parsing in calculate
+                                        placeholder="e.g., 25,000,000"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                    />
+                                </div>
+                                {/* Real-time FF Tier and Percentage display */}
+                                {ffAgentTier && ffCommissionPercentage !== null && (
+                                    <div className="mt-6 p-4 bg-blue-100 rounded-lg border border-blue-200 text-center">
+                                        <p className="text-sm font-medium text-gray-700 mb-2">Your Firm Foundation Tier:</p>
+                                        <p className="text-blue-800 font-bold text-lg">{ffAgentTier}</p>
+                                        <p className="text-sm font-medium text-gray-700 mt-2">Your Commission Percentage:</p>
+                                        <p className="text-blue-800 font-bold text-lg">{ffCommissionPercentage}%</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Calculate Button */}
+                        <button
+                            onClick={calculateComparison}
+                            className="w-full bg-orange-600 text-white py-3 rounded-lg font-semibold text-lg hover:bg-orange-700 focus:outline-none focus:ring-4 focus:ring-orange-300 transition duration-300 ease-in-out transform hover:-translate-y-0.5 shadow-lg mb-8"
+                        >
+                            Compare Earnings
+                        </button>
+
+                        {/* Error Message Display */}
+                        {errorMessage && (
+                            <div className="mt-6 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg text-center">
+                                {errorMessage}
+                            </div>
+                        )}
+
+                        {/* Results Display */}
+                        {currentBrokerageNet !== null && ffNetCommission !== null && (
+                            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+                                {/* Current Brokerage Results */}
+                                <div className="bg-gray-50 p-6 rounded-xl border border-gray-200 shadow-inner">
+                                    <h2 className="text-xl font-bold text-gray-800 mb-4 text-center">Current Brokerage Earnings</h2>
+                                    <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                                        <span className="text-gray-600 font-medium">Total Gross Commission Generated:</span>
+                                        <span className="text-gray-800 font-semibold text-lg">${totalGrossCommissionGenerated?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                                        <span className="text-gray-600 font-medium">Agent's Gross Commission Earned:</span>
+                                        <span className="text-gray-800 font-semibold text-lg">${currentBrokerageAgentGrossEarned?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                                        <span className="text-gray-600 font-medium">Amount Paid to Brokerage:</span>
+                                        <span className="text-gray-800 font-semibold text-lg">${amountPaidToCurrentBrokerage?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2">
+                                        <span className="text-gray-600 font-medium">Net Commission:</span>
+                                        <span className="text-gray-800 font-extrabold text-xl">${currentBrokerageNet?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                    </div>
+                                </div>
+
+                                {/* Firm Foundation Results */}
+                                <div className="bg-blue-50 p-6 rounded-xl border border-blue-200 shadow-inner">
+                                    <h2 className="text-xl font-bold text-gray-800 mb-4 text-center">Firm Foundation Earnings</h2>
+                                    <div className="flex justify-between items-center py-2 border-b border-blue-200">
+                                        <span className="text-gray-600 font-medium">Agent Tier:</span>
+                                        <span className="text-blue-700 font-extrabold text-xl">{ffAgentTier}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 border-b border-blue-200">
+                                        <span className="text-gray-600 font-medium">Commission Percentage:</span>
+                                        <span className="text-blue-700 font-semibold text-lg">{ffCommissionPercentage}%</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 border-b border-blue-200">
+                                        <span className="text-gray-600 font-medium">Gross Commission Earned:</span>
+                                        <span className="text-blue-700 font-semibold text-lg">${ffGrossCommission?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 border-b border-blue-200">
+                                        <span className="text-gray-600 font-medium">Max Annual Broker Commission:</span>
+                                        <span className="text-blue-700 font-semibold text-lg">
+                                            ${ffMaxBrokerCommission?.toLocaleString()}
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2">
+                                        <span className="text-gray-600 font-medium">Net Commission:</span>
+                                        <span className="text-blue-700 font-extrabold text-xl">${ffNetCommission?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                    </div>
+
+                                    {/* Next Tier Progress Display */}
+                                    {ffAgentTier !== 'Apex Agent' && nextTierName && (transactionsToNextTier > 0 || salesVolumeToNextTier > 0) && (
+                                        <div className="mt-6 p-4 bg-blue-100 rounded-lg border border-blue-200 text-center">
+                                            <p className="text-sm font-medium text-gray-700 mb-2">Progress to Next Tier:</p>
+                                            <p className="text-blue-800 font-bold text-lg">
+                                                To reach <span className="text-orange-600">{nextTierName}</span>:
+                                            </p>
+                                            {transactionsToNextTier !== null && transactionsToNextTier > 0 && (
+                                                <p className="text-blue-800 text-md mt-1">
+                                                    - {transactionsToNextTier} more transactions
+                                                </p>
+                                            )}
+                                            {salesVolumeToNextTier !== null && salesVolumeToNextTier > 0 && (
+                                                <p className="text-blue-800 text-md mt-1">
+                                                    - ${salesVolumeToNextTier.toLocaleString()} more in sales volume
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+                                    {ffAgentTier === 'Apex Agent' && (
+                                        <div className="mt-6 p-4 bg-blue-100 rounded-lg border border-blue-200 text-center">
+                                            <p className="text-sm font-medium text-gray-700 mb-2">Tier Progress:</p>
+                                            <p className="text-blue-800 font-bold text-lg">
+                                                You are already at the highest tier (Apex Agent)!
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Overall Comparison Result */}
+                        {netDifference !== null && (
+                            <div className="mt-8 p-6 rounded-xl shadow-lg text-center"
+                                style={{
+                                    background: netDifference >= 0 ? 'linear-gradient(to right, #dcfce7, #a7f3d0)' : 'linear-gradient(to right, #fee2e2, #fecaca)'
+                                }}>
+                                <h2 className="text-2xl font-bold mb-3"
+                                    style={{ color: netDifference >= 0 ? '#10b981' : '#ef4444' }}>
+                                    Net Earnings Difference:
+                                </h2>
+                                <p className="text-4xl font-extrabold"
+                                   style={{ color: netDifference >= 0 ? '#059669' : '#dc2626' }}>
+                                    {netDifference >= 0 ? '+' : ''}${netDifference?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                                </p>
+                                <p className="text-lg mt-2 text-gray-700">
+                                    {netDifference >= 0
+                                        ? "You could earn more at Firm Foundation!"
+                                        : "You would earn less at Firm Foundation with these inputs."}
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Call to Action Buttons */}
+                        {netDifference !== null && (
+                            <div className="mt-8 flex flex-col sm:flex-row justify-center gap-4">
+                                <a
+                                    href="tel:5027278340"
+                                    className="flex items-center justify-center px-6 py-3 bg-blue-700 text-white font-semibold rounded-lg shadow-md hover:bg-blue-800 transition duration-300 ease-in-out transform hover:-translate-y-1 hover:scale-105"
+                                >
+                                    <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.774a11.037 11.037 0 006.103 6.103l.774-1.548a1 1 0 011.06-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"></path></svg>
+                                    Call Dustin Robinson
+                                </a>
+                                <a
+                                    href="mailto:drobinson@firmfoundationrea.com"
+                                    className="flex items-center justify-center px-6 py-3 bg-orange-600 text-white font-semibold rounded-lg shadow-md hover:bg-orange-700 transition duration-300 ease-in-out transform hover:-translate-y-1 hover:scale-105"
+                                >
+                                    <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"></path><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"></path></svg>
+                                    Email Dustin Robinson
+                                </a>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
